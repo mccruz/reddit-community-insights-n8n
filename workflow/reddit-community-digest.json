@@ -1,0 +1,721 @@
+{
+  "name": "Portfolio - Daily Reddit Community Digest to Slack",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d11f9148-4669-5fb1-8e7e-47ef07453964",
+      "name": "Manual - r-codex",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1240,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "60631d91-4bb9-529a-af89-02d12c41cd0e",
+      "name": "Schedule - r-codex at 08:00 Manila",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1240,
+        80
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "76d7085f-cafa-5b91-8867-8bb0524bcffb",
+      "name": "Manual - r-AI_Agents",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1240,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "9ae58fe3-70e7-56cf-83ba-0b11a82c1f8d",
+      "name": "Schedule - r-AI_Agents at 08:20 Manila",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1240,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/codex/top/.rss?t=day&limit=10",
+        "options": {}
+      },
+      "id": "fbdc2144-54d0-5756-8904-da5c401d5b90",
+      "name": "Fetch r-codex Top Day RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        -1040,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000,
+      "notes": "Uses Reddit's public Top/day RSS feed. One subreddit is fetched per execution, with bounded retries for transient rate limits."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'codex';\nconst subredditLabel = 'r/codex';\nconst maxPosts = 3;\n\nfunction decodeEntities(value) {\n  const named = {\n    amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n    '#39': \"'\", '#x27': \"'\", '#x2F': '/',\n  };\n  return String(value ?? '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, key) => {\n    const normalized = key.toLowerCase();\n    if (named[normalized] !== undefined) return named[normalized];\n    if (normalized.startsWith('#x')) return String.fromCodePoint(parseInt(normalized.slice(2), 16));\n    if (normalized.startsWith('#')) return String.fromCodePoint(parseInt(normalized.slice(1), 10));\n    return match;\n  });\n}\n\nfunction plain(value) {\n  return decodeEntities(decodeEntities(value))\n    .replace(/<a\\b[^>]*>.*?<\\/a>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction clip(value, limit) {\n  const text = plain(value);\n  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction cleanExcerpt(value) {\n  return plain(value)\n    .replace(/https?:\\/\\/(?:preview\\.)?redd\\.it\\/\\S+/gi, ' ')\n    .replace(/\\[(?:link|comments)\\]/gi, ' ')\n    .replace(/\\s+submitted by\\s+.*$/i, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst seen = new Set();\nconst posts = [];\nfor (const item of $input.all()) {\n  const source = item.json ?? {};\n  const title = plain(source.title);\n  const link = String(source.link ?? source.guid ?? '').trim().split(/[?#]/)[0];\n  if (!title || !/^https:\\/\\/www\\.reddit\\.com\\/r\\//i.test(link) || seen.has(link)) continue;\n  seen.add(link);\n  const normalizedLink = link.replace(/\\/?$/, '/');\n  const postId = normalizedLink.match(/\\/comments\\/([A-Za-z0-9_-]+)\\//i)?.[1]\n    ?? `post_${posts.length + 1}`;\n  posts.push({\n    postId,\n    subreddit,\n    subredditLabel,\n    rank: posts.length + 1,\n    title,\n    link: normalizedLink,\n    author: plain(source.creator ?? source.author ?? ''),\n    excerpt: clip(cleanExcerpt(source.contentSnippet ?? source.content ?? source.summary ?? ''), 2000),\n    publishedAt: source.isoDate ?? source.pubDate ?? null,\n  });\n  if (posts.length >= maxPosts) break;\n}\n\nif (!posts.length) {\n  throw new Error(`No usable posts were returned for ${subredditLabel}`);\n}\n\nreturn posts.map((json) => ({ json }));\n"
+      },
+      "id": "d30b2e58-4e72-4ee7-b199-5023ece633f6",
+      "name": "Prepare r-codex Top Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        0
+      ],
+      "notes": "Keeps the first three valid posts in Reddit Top/day order and preserves each Reddit post ID for exact thread-comment matching."
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "56cd42b8-56d5-541b-b701-33a1b67c78a4",
+      "name": "Respect Reddit Rate Window - r-codex",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -560,
+        0
+      ],
+      "notes": "Spaces the post and comment RSS calls by one public Reddit rate window. This avoids the observed one-request-per-window 429 response."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'codex';\nconst subredditLabel = 'r/codex';\n\nconst posts = $input.all().map((item) => item.json ?? {});\nif (!posts.length) {\n  throw new Error(`No prepared posts were available for ${subredditLabel}`);\n}\n\nreturn [{\n  json: {\n    subreddit,\n    postIds: posts.map((post) => String(post.postId ?? '')).filter(Boolean).slice(0, 3),\n  },\n}];\n"
+      },
+      "id": "834608e3-d241-550b-a923-e39f0739e23e",
+      "name": "Prepare r-codex Recent Comment Stream",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        0
+      ],
+      "notes": "Builds one bounded request for the three displayed post IDs. The sidecar paces exact thread RSS calls using Reddit's reset header."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://summary-sidecar:8787/v1/reddit-comments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { subreddit: $json.subreddit, postIds: $json.postIds } }}",
+        "options": {
+          "timeout": 240000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "50113789-6753-41cd-9447-4e4c7b1e829f",
+      "name": "Fetch r-codex Recent Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -80,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 60000,
+      "onError": "continueRegularOutput",
+      "notes": "Calls the sidecar's hard-coded Reddit fetcher for exact Top comments from all three displayed threads. The Codex model remains network-disabled."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'codex';\nconst subredditLabel = 'r/codex';\nconst prepareNodeName = 'Prepare r-codex Top Posts';\n\nfunction decodeEntities(value) {\n  const named = {\n    amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n    '#39': \"'\", '#x27': \"'\", '#x2f': '/',\n  };\n  return String(value ?? '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, key) => {\n    const normalized = key.toLowerCase();\n    if (named[normalized] !== undefined) return named[normalized];\n    if (normalized.startsWith('#x')) return String.fromCodePoint(parseInt(normalized.slice(2), 16));\n    if (normalized.startsWith('#')) return String.fromCodePoint(parseInt(normalized.slice(1), 10));\n    return match;\n  });\n}\n\nfunction plain(value) {\n  return decodeEntities(decodeEntities(value))\n    .replace(/<a\\b[^>]*>(.*?)<\\/a>/gi, '$1')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction clip(value, limit) {\n  const text = plain(value);\n  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction tagValue(block, tag) {\n  const match = String(block).match(new RegExp(`<${tag}\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`, 'i'));\n  return match ? match[1] : '';\n}\n\nfunction parseComments(xml) {\n  const entries = String(xml ?? '').match(/<entry\\b[\\s\\S]*?<\\/entry>/gi) ?? [];\n  return entries\n    .map((entry) => ({\n      id: plain(tagValue(entry, 'id')),\n      author: clip(tagValue(entry, 'author'), 80),\n      body: clip(tagValue(entry, 'content'), 1500),\n      postId: String(entry.match(/<link\\b[^>]*href=[\"'][^\"']*\\/comments\\/([A-Za-z0-9_-]+)\\//i)?.[1] ?? ''),\n      score: null,\n    }))\n    .filter((entry) => /^t1_/i.test(entry.id) && entry.postId && entry.body.length > 1);\n}\n\nfunction responseBody(item) {\n  const source = item?.json ?? {};\n  if (typeof source.body === 'string') return source.body;\n  if (typeof source.data === 'string') return source.data;\n  if (typeof source === 'string') return source;\n  return '';\n}\n\nfunction responseComments(item) {\n  const source = item?.json ?? {};\n  if (!Array.isArray(source.comments)) return [];\n  return source.comments\n    .map((comment) => ({\n      postId: String(comment?.postId ?? ''),\n      author: clip(comment?.author, 80),\n      body: clip(comment?.body, 1500),\n      score: null,\n    }))\n    .filter((comment) => comment.postId && comment.body)\n    .slice(0, 100);\n}\n\nconst prepared = $(prepareNodeName).all().map((item) => item.json ?? {});\nconst responses = $input.all();\nif (!prepared.length) throw new Error(`No prepared posts were available for ${subredditLabel}`);\n\nconst allComments = responses.flatMap((response) => {\n  const structured = responseComments(response);\n  return structured.length ? structured : parseComments(responseBody(response));\n});\n\nconst posts = prepared.map((post, index) => ({\n  id: String(post.postId ?? `post_${index + 1}`),\n  title: clip(post.title, 300),\n  url: String(post.link ?? ''),\n  body: clip(post.excerpt, 6000),\n  comments: allComments\n    .filter((comment) => comment.postId === String(post.postId ?? `post_${index + 1}`))\n    .slice(0, 10)\n    .map(({ author, body, score }) => ({ author, body, score })),\n}));\n\nreturn [{ json: { subreddit, posts } }];\n"
+      },
+      "id": "e7bdd145-5c7a-57e5-8f7e-69d8073c60e5",
+      "name": "Assemble r-codex Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        0
+      ],
+      "notes": "Parses only public t1_ comment entries, including author and body, and emits one bounded evidence request for the isolated summarizer."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://summary-sidecar:8787/v1/summarize",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 380000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3d1b6ee7-dfc0-5007-9745-498117f8215f",
+      "name": "Summarize r-codex via Isolated Codex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        0
+      ],
+      "notes": "Calls a private, network-disabled, read-only Codex sidecar. Input is allowlisted and bounded; tool activity or secret-like output fails closed."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'codex';\nconst subredditLabel = 'r/codex';\nconst prepareNodeName = 'Prepare r-codex Top Posts';\n\nfunction slackText(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst posts = $(prepareNodeName).all().map((item) => item.json ?? {});\nif (!posts.length) throw new Error(`No prepared posts were available for ${subredditLabel}`);\n\nconst response = $input.first()?.json ?? {};\nconst summaries = Array.isArray(response.summaries) ? response.summaries : [];\nconst byId = new Map(summaries.map((item) => [String(item.postId ?? ''), String(item.summary ?? '').trim()]));\nif (byId.size !== posts.length) {\n  throw new Error(`The isolated summarizer returned ${byId.size} summaries for ${posts.length} ${subredditLabel} posts`);\n}\n\nconst discussions = posts.map((post, index) => {\n  const postId = String(post.postId ?? `post_${index + 1}`);\n  const summary = byId.get(postId);\n  if (!summary) throw new Error(`The isolated summarizer omitted post ${postId}`);\n  const author = post.author ? ` — ${slackText(post.author)}` : '';\n  return `${post.rank ?? index + 1}. <${post.link}|${slackText(post.title)}>${author}\\n   ${slackText(summary)}`;\n});\n\nconst date = new Intl.DateTimeFormat('en-PH', {\n  timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: '2-digit',\n}).format(new Date());\n\nconst message = [\n  `*Daily Reddit digest — ${subredditLabel}*`,\n  `_${date} · Reddit Top/day · ${posts.length} discussions reviewed_`,\n  '',\n  '*Top discussions*',\n  discussions.join('\\n\\n'),\n].join('\\n');\n\nif (message.length > 3900) {\n  throw new Error(`Slack digest exceeded the safe message limit for ${subredditLabel}`);\n}\n\nreturn [{\n  json: {\n    subreddit,\n    subredditLabel,\n    postCount: posts.length,\n    topLinks: posts.map((post) => post.link),\n    message,\n  },\n}];\n"
+      },
+      "id": "58c8645c-5f3f-5727-a850-72a14f435ccd",
+      "name": "Build r-codex Slack Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        0
+      ],
+      "notes": "Maps validated 3-4 sentence summaries back to Reddit links and formats only the requested Top discussions section."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "8d24462c-603d-50de-82df-a1809322b05c",
+      "name": "Slack - Send r-codex Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/AI_Agents/top/.rss?t=day&limit=10",
+        "options": {}
+      },
+      "id": "e6801ce8-94b5-51b7-8bec-d2000a5ec182",
+      "name": "Fetch r-AI_Agents Top Day RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        -1040,
+        520
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000,
+      "notes": "Uses Reddit's public Top/day RSS feed. One subreddit is fetched per execution, with bounded retries for transient rate limits."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'AI_Agents';\nconst subredditLabel = 'r/AI_Agents';\nconst maxPosts = 3;\n\nfunction decodeEntities(value) {\n  const named = {\n    amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n    '#39': \"'\", '#x27': \"'\", '#x2F': '/',\n  };\n  return String(value ?? '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, key) => {\n    const normalized = key.toLowerCase();\n    if (named[normalized] !== undefined) return named[normalized];\n    if (normalized.startsWith('#x')) return String.fromCodePoint(parseInt(normalized.slice(2), 16));\n    if (normalized.startsWith('#')) return String.fromCodePoint(parseInt(normalized.slice(1), 10));\n    return match;\n  });\n}\n\nfunction plain(value) {\n  return decodeEntities(decodeEntities(value))\n    .replace(/<a\\b[^>]*>.*?<\\/a>/gi, ' ')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction clip(value, limit) {\n  const text = plain(value);\n  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction cleanExcerpt(value) {\n  return plain(value)\n    .replace(/https?:\\/\\/(?:preview\\.)?redd\\.it\\/\\S+/gi, ' ')\n    .replace(/\\[(?:link|comments)\\]/gi, ' ')\n    .replace(/\\s+submitted by\\s+.*$/i, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst seen = new Set();\nconst posts = [];\nfor (const item of $input.all()) {\n  const source = item.json ?? {};\n  const title = plain(source.title);\n  const link = String(source.link ?? source.guid ?? '').trim().split(/[?#]/)[0];\n  if (!title || !/^https:\\/\\/www\\.reddit\\.com\\/r\\//i.test(link) || seen.has(link)) continue;\n  seen.add(link);\n  const normalizedLink = link.replace(/\\/?$/, '/');\n  const postId = normalizedLink.match(/\\/comments\\/([A-Za-z0-9_-]+)\\//i)?.[1]\n    ?? `post_${posts.length + 1}`;\n  posts.push({\n    postId,\n    subreddit,\n    subredditLabel,\n    rank: posts.length + 1,\n    title,\n    link: normalizedLink,\n    author: plain(source.creator ?? source.author ?? ''),\n    excerpt: clip(cleanExcerpt(source.contentSnippet ?? source.content ?? source.summary ?? ''), 2000),\n    publishedAt: source.isoDate ?? source.pubDate ?? null,\n  });\n  if (posts.length >= maxPosts) break;\n}\n\nif (!posts.length) {\n  throw new Error(`No usable posts were returned for ${subredditLabel}`);\n}\n\nreturn posts.map((json) => ({ json }));\n"
+      },
+      "id": "7cbf05cc-63f2-4c95-8402-128b4a6d93c7",
+      "name": "Prepare r-AI_Agents Top Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        520
+      ],
+      "notes": "Keeps the first three valid posts in Reddit Top/day order and preserves each Reddit post ID for exact thread-comment matching."
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "8dd3bac2-14a5-5a27-94ad-ebf800087b5b",
+      "name": "Respect Reddit Rate Window - r-AI_Agents",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -560,
+        520
+      ],
+      "notes": "Spaces the post and comment RSS calls by one public Reddit rate window. This avoids the observed one-request-per-window 429 response."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'AI_Agents';\nconst subredditLabel = 'r/AI_Agents';\n\nconst posts = $input.all().map((item) => item.json ?? {});\nif (!posts.length) {\n  throw new Error(`No prepared posts were available for ${subredditLabel}`);\n}\n\nreturn [{\n  json: {\n    subreddit,\n    postIds: posts.map((post) => String(post.postId ?? '')).filter(Boolean).slice(0, 3),\n  },\n}];\n"
+      },
+      "id": "3d9ecbfd-028e-5288-9c62-30780368f10b",
+      "name": "Prepare r-AI_Agents Recent Comment Stream",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        520
+      ],
+      "notes": "Builds one bounded request for the three displayed post IDs. The sidecar paces exact thread RSS calls using Reddit's reset header."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://summary-sidecar:8787/v1/reddit-comments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { subreddit: $json.subreddit, postIds: $json.postIds } }}",
+        "options": {
+          "timeout": 240000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "5b9ed6bb-b347-4aa5-b965-aa61802e5a11",
+      "name": "Fetch r-AI_Agents Recent Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -80,
+        520
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 60000,
+      "onError": "continueRegularOutput",
+      "notes": "Calls the sidecar's hard-coded Reddit fetcher for exact Top comments from all three displayed threads. The Codex model remains network-disabled."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'AI_Agents';\nconst subredditLabel = 'r/AI_Agents';\nconst prepareNodeName = 'Prepare r-AI_Agents Top Posts';\n\nfunction decodeEntities(value) {\n  const named = {\n    amp: '&', lt: '<', gt: '>', quot: '\"', apos: \"'\", nbsp: ' ',\n    '#39': \"'\", '#x27': \"'\", '#x2f': '/',\n  };\n  return String(value ?? '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, key) => {\n    const normalized = key.toLowerCase();\n    if (named[normalized] !== undefined) return named[normalized];\n    if (normalized.startsWith('#x')) return String.fromCodePoint(parseInt(normalized.slice(2), 16));\n    if (normalized.startsWith('#')) return String.fromCodePoint(parseInt(normalized.slice(1), 10));\n    return match;\n  });\n}\n\nfunction plain(value) {\n  return decodeEntities(decodeEntities(value))\n    .replace(/<a\\b[^>]*>(.*?)<\\/a>/gi, '$1')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction clip(value, limit) {\n  const text = plain(value);\n  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;\n}\n\nfunction tagValue(block, tag) {\n  const match = String(block).match(new RegExp(`<${tag}\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/${tag}>`, 'i'));\n  return match ? match[1] : '';\n}\n\nfunction parseComments(xml) {\n  const entries = String(xml ?? '').match(/<entry\\b[\\s\\S]*?<\\/entry>/gi) ?? [];\n  return entries\n    .map((entry) => ({\n      id: plain(tagValue(entry, 'id')),\n      author: clip(tagValue(entry, 'author'), 80),\n      body: clip(tagValue(entry, 'content'), 1500),\n      postId: String(entry.match(/<link\\b[^>]*href=[\"'][^\"']*\\/comments\\/([A-Za-z0-9_-]+)\\//i)?.[1] ?? ''),\n      score: null,\n    }))\n    .filter((entry) => /^t1_/i.test(entry.id) && entry.postId && entry.body.length > 1);\n}\n\nfunction responseBody(item) {\n  const source = item?.json ?? {};\n  if (typeof source.body === 'string') return source.body;\n  if (typeof source.data === 'string') return source.data;\n  if (typeof source === 'string') return source;\n  return '';\n}\n\nfunction responseComments(item) {\n  const source = item?.json ?? {};\n  if (!Array.isArray(source.comments)) return [];\n  return source.comments\n    .map((comment) => ({\n      postId: String(comment?.postId ?? ''),\n      author: clip(comment?.author, 80),\n      body: clip(comment?.body, 1500),\n      score: null,\n    }))\n    .filter((comment) => comment.postId && comment.body)\n    .slice(0, 100);\n}\n\nconst prepared = $(prepareNodeName).all().map((item) => item.json ?? {});\nconst responses = $input.all();\nif (!prepared.length) throw new Error(`No prepared posts were available for ${subredditLabel}`);\n\nconst allComments = responses.flatMap((response) => {\n  const structured = responseComments(response);\n  return structured.length ? structured : parseComments(responseBody(response));\n});\n\nconst posts = prepared.map((post, index) => ({\n  id: String(post.postId ?? `post_${index + 1}`),\n  title: clip(post.title, 300),\n  url: String(post.link ?? ''),\n  body: clip(post.excerpt, 6000),\n  comments: allComments\n    .filter((comment) => comment.postId === String(post.postId ?? `post_${index + 1}`))\n    .slice(0, 10)\n    .map(({ author, body, score }) => ({ author, body, score })),\n}));\n\nreturn [{ json: { subreddit, posts } }];\n"
+      },
+      "id": "de5fbfe5-f46a-526d-a4e1-67e15809e1b9",
+      "name": "Assemble r-AI_Agents Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        520
+      ],
+      "notes": "Parses only public t1_ comment entries, including author and body, and emits one bounded evidence request for the isolated summarizer."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://summary-sidecar:8787/v1/summarize",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 380000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3ae9fb55-69a5-5ee5-a768-f47e36ca3b22",
+      "name": "Summarize r-AI_Agents via Isolated Codex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        520
+      ],
+      "notes": "Calls a private, network-disabled, read-only Codex sidecar. Input is allowlisted and bounded; tool activity or secret-like output fails closed."
+    },
+    {
+      "parameters": {
+        "jsCode": "const subreddit = 'AI_Agents';\nconst subredditLabel = 'r/AI_Agents';\nconst prepareNodeName = 'Prepare r-AI_Agents Top Posts';\n\nfunction slackText(value) {\n  return String(value ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst posts = $(prepareNodeName).all().map((item) => item.json ?? {});\nif (!posts.length) throw new Error(`No prepared posts were available for ${subredditLabel}`);\n\nconst response = $input.first()?.json ?? {};\nconst summaries = Array.isArray(response.summaries) ? response.summaries : [];\nconst byId = new Map(summaries.map((item) => [String(item.postId ?? ''), String(item.summary ?? '').trim()]));\nif (byId.size !== posts.length) {\n  throw new Error(`The isolated summarizer returned ${byId.size} summaries for ${posts.length} ${subredditLabel} posts`);\n}\n\nconst discussions = posts.map((post, index) => {\n  const postId = String(post.postId ?? `post_${index + 1}`);\n  const summary = byId.get(postId);\n  if (!summary) throw new Error(`The isolated summarizer omitted post ${postId}`);\n  const author = post.author ? ` — ${slackText(post.author)}` : '';\n  return `${post.rank ?? index + 1}. <${post.link}|${slackText(post.title)}>${author}\\n   ${slackText(summary)}`;\n});\n\nconst date = new Intl.DateTimeFormat('en-PH', {\n  timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: '2-digit',\n}).format(new Date());\n\nconst message = [\n  `*Daily Reddit digest — ${subredditLabel}*`,\n  `_${date} · Reddit Top/day · ${posts.length} discussions reviewed_`,\n  '',\n  '*Top discussions*',\n  discussions.join('\\n\\n'),\n].join('\\n');\n\nif (message.length > 3900) {\n  throw new Error(`Slack digest exceeded the safe message limit for ${subredditLabel}`);\n}\n\nreturn [{\n  json: {\n    subreddit,\n    subredditLabel,\n    postCount: posts.length,\n    topLinks: posts.map((post) => post.link),\n    message,\n  },\n}];\n"
+      },
+      "id": "5cf5e339-7505-5ce2-8678-5797ed5414f9",
+      "name": "Build r-AI_Agents Slack Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        520
+      ],
+      "notes": "Maps validated 3-4 sentence summaries back to Reddit links and formats only the requested Top discussions section."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "={{ $json.message }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "id": "c10a9888-1dd5-5b1a-bc64-6bcbec84f744",
+      "name": "Slack - Send r-AI_Agents Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Recruiter-facing design\n\nTwo parallel, visually consistent lanes turn Reddit Top/day evidence into separate Slack digests. Post excerpts and sampled Top comments are summarized by an isolated Codex sidecar with bounded input, read-only execution, no network access, fail-closed tool detection, and no hard-coded secrets.\n\nManual testing: use the canvas-level Execute workflow control and select the desired Manual trigger. Execute step runs only the selected node and does not continue through the formatter to Slack.\n\nTop discussions means the first three valid entries returned by Reddit's Top/day RSS ranking. The public export replaces the private Slack DM channel with a placeholder.",
+        "height": 320,
+        "width": 680
+      },
+      "id": "702a045e-5a47-56a7-90db-68c1aef4e8fa",
+      "name": "Portfolio Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1240,
+        -620
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 1 · Collect responsibly\nThree Reddit Top/day posts, then exact Top comments paced by Reddit's reset header",
+        "height": 120,
+        "width": 920
+      },
+      "id": "399f1edc-68c3-5a7d-827b-5d79a5487b01",
+      "name": "Stage 1 - Collect",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1080,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 2 · Structure evidence\nBounded post and comment payloads",
+        "height": 120,
+        "width": 220
+      },
+      "id": "93344b30-1852-5b92-b608-cf7ee510f616",
+      "name": "Stage 2 - Evidence",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        120,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 3 · Summarize safely\nIsolated Codex with fail-closed guards",
+        "height": 120,
+        "width": 220
+      },
+      "id": "c1172973-e25b-5140-b4ea-f1bf2c65f3d7",
+      "name": "Stage 3 - Isolated AI",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        360,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 4 · Deliver\nFormat and send one Slack digest per subreddit",
+        "height": 120,
+        "width": 480
+      },
+      "id": "5a2fa81c-f6f0-5180-b5b8-bc08401897e6",
+      "name": "Stage 4 - Slack",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        600,
+        -260
+      ]
+    }
+  ],
+  "connections": {
+    "Manual - r-codex": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-codex Top Day RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - r-codex at 08:00 Manila": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-codex Top Day RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch r-codex Top Day RSS": {
+      "main": [
+        [
+          {
+            "node": "Prepare r-codex Top Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare r-codex Top Posts": {
+      "main": [
+        [
+          {
+            "node": "Respect Reddit Rate Window - r-codex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respect Reddit Rate Window - r-codex": {
+      "main": [
+        [
+          {
+            "node": "Prepare r-codex Recent Comment Stream",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare r-codex Recent Comment Stream": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-codex Recent Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch r-codex Recent Comments": {
+      "main": [
+        [
+          {
+            "node": "Assemble r-codex Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble r-codex Evidence": {
+      "main": [
+        [
+          {
+            "node": "Summarize r-codex via Isolated Codex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize r-codex via Isolated Codex": {
+      "main": [
+        [
+          {
+            "node": "Build r-codex Slack Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build r-codex Slack Digest": {
+      "main": [
+        [
+          {
+            "node": "Slack - Send r-codex Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual - r-AI_Agents": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-AI_Agents Top Day RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - r-AI_Agents at 08:20 Manila": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-AI_Agents Top Day RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch r-AI_Agents Top Day RSS": {
+      "main": [
+        [
+          {
+            "node": "Prepare r-AI_Agents Top Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare r-AI_Agents Top Posts": {
+      "main": [
+        [
+          {
+            "node": "Respect Reddit Rate Window - r-AI_Agents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respect Reddit Rate Window - r-AI_Agents": {
+      "main": [
+        [
+          {
+            "node": "Prepare r-AI_Agents Recent Comment Stream",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare r-AI_Agents Recent Comment Stream": {
+      "main": [
+        [
+          {
+            "node": "Fetch r-AI_Agents Recent Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch r-AI_Agents Recent Comments": {
+      "main": [
+        [
+          {
+            "node": "Assemble r-AI_Agents Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble r-AI_Agents Evidence": {
+      "main": [
+        [
+          {
+            "node": "Summarize r-AI_Agents via Isolated Codex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize r-AI_Agents via Isolated Codex": {
+      "main": [
+        [
+          {
+            "node": "Build r-AI_Agents Slack Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build r-AI_Agents Slack Digest": {
+      "main": [
+        [
+          {
+            "node": "Slack - Send r-AI_Agents Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Manila",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}

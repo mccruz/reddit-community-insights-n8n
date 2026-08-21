@@ -1,0 +1,57 @@
+services:
+  summary-sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local/reddit-community-summary-sidecar:0.1.0
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      CODEX_HOME: /var/lib/codex
+      CODEX_MODEL: gpt-5.4-mini
+      CODEX_REASONING_EFFORT: medium
+      SIDECAR_CANARY_SECRET: ${SIDECAR_CANARY_SECRET:?set SIDECAR_CANARY_SECRET in .env}
+      SERVICE_TOKEN_FILE: /run/secrets/service_token
+      TURN_TIMEOUT_MS: "180000"
+      WORKING_DIRECTORY: /work
+    secrets:
+      - service_token
+    volumes:
+      - codex_auth:/var/lib/codex
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000
+    networks:
+      n8n:
+        aliases:
+          - summary-sidecar
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8787/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+secrets:
+  service_token:
+    file: ./secrets/service_token
+
+volumes:
+  codex_auth:
+
+networks:
+  n8n:
+    external: true
+    name: n8n_default

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Reddit Community Insights architecture</title>
+  <desc id="desc">Two independent n8n lanes collect Reddit evidence, use an isolated summarizer, and send separate Slack digests.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#09111f"/>
+      <stop offset="1" stop-color="#13233b"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7dd3fc"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="640" rx="28" fill="url(#bg)"/>
+  <text x="72" y="78" fill="#f8fafc" font-family="Inter,Arial,sans-serif" font-size="36" font-weight="700">Reddit Community Insights</text>
+  <text x="72" y="112" fill="#9fb2ca" font-family="Inter,Arial,sans-serif" font-size="18">Evidence-grounded n8n automation with an isolated AI boundary</text>
+
+  <g font-family="Inter,Arial,sans-serif" filter="url(#shadow)">
+    <rect x="72" y="170" width="170" height="112" rx="18" fill="#ff5a36"/>
+    <text x="157" y="215" fill="#fff" font-size="22" font-weight="700" text-anchor="middle">r/codex</text>
+    <text x="157" y="247" fill="#fff4ef" font-size="15" text-anchor="middle">08:00 · manual</text>
+
+    <rect x="72" y="358" width="170" height="112" rx="18" fill="#ff5a36"/>
+    <text x="157" y="403" fill="#fff" font-size="22" font-weight="700" text-anchor="middle">r/AI_Agents</text>
+    <text x="157" y="435" fill="#fff4ef" font-size="15" text-anchor="middle">08:20 · manual</text>
+
+    <rect x="314" y="208" width="210" height="224" rx="20" fill="#172c46" stroke="#38bdf8" stroke-width="2"/>
+    <text x="419" y="253" fill="#e0f2fe" font-size="21" font-weight="700" text-anchor="middle">Collect evidence</text>
+    <text x="419" y="292" fill="#b8cadc" font-size="16" text-anchor="middle">Top/day RSS</text>
+    <text x="419" y="323" fill="#b8cadc" font-size="16" text-anchor="middle">Exact thread comments</text>
+    <text x="419" y="354" fill="#b8cadc" font-size="16" text-anchor="middle">Bounded retries</text>
+    <text x="419" y="385" fill="#b8cadc" font-size="16" text-anchor="middle">Rate-aware pacing</text>
+
+    <rect x="596" y="208" width="260" height="224" rx="20" fill="#173b3a" stroke="#2dd4bf" stroke-width="2"/>
+    <text x="726" y="253" fill="#ccfbf1" font-size="21" font-weight="700" text-anchor="middle">Isolated summarizer</text>
+    <text x="726" y="292" fill="#b8d8d3" font-size="16" text-anchor="middle">Read-only · no tools</text>
+    <text x="726" y="323" fill="#b8d8d3" font-size="16" text-anchor="middle">Network disabled</text>
+    <text x="726" y="354" fill="#b8d8d3" font-size="16" text-anchor="middle">Strict JSON schema</text>
+    <text x="726" y="385" fill="#b8d8d3" font-size="16" text-anchor="middle">Fail-closed validation</text>
+
+    <rect x="928" y="208" width="280" height="224" rx="20" fill="#2d244d" stroke="#a78bfa" stroke-width="2"/>
+    <text x="1068" y="253" fill="#ede9fe" font-size="21" font-weight="700" text-anchor="middle">Slack delivery</text>
+    <text x="1068" y="292" fill="#cfc6e8" font-size="16" text-anchor="middle">Two separate digests</text>
+    <text x="1068" y="323" fill="#cfc6e8" font-size="16" text-anchor="middle">3–4 sentences per post</text>
+    <text x="1068" y="354" fill="#cfc6e8" font-size="16" text-anchor="middle">Source links preserved</text>
+    <text x="1068" y="385" fill="#cfc6e8" font-size="16" text-anchor="middle">Credential-bound sink</text>
+  </g>
+
+  <g fill="none" stroke="#7dd3fc" stroke-width="4" marker-end="url(#arrow)">
+    <path d="M242 226 H288 Q300 226 300 238 V278"/>
+    <path d="M242 414 H288 Q300 414 300 402 V362"/>
+    <path d="M524 320 H580"/>
+    <path d="M856 320 H912"/>
+  </g>
+
+  <rect x="314" y="497" width="894" height="64" rx="16" fill="#0c1829" stroke="#29425f"/>
+  <text x="761" y="537" fill="#9fb2ca" font-family="Inter,Arial,sans-serif" font-size="16" text-anchor="middle">Untrusted Reddit text never receives tools, credentials, filesystem access, or model network access</text>
+</svg>
