@@ -15,6 +15,7 @@ import {
   fetchRedditComments,
   normalizeRedditFeedRequest,
 } from './reddit.mjs';
+import { materializePostImages } from './media.mjs';
 
 const PORT = Number.parseInt(process.env.PORT ?? '8787', 10);
 const CODEX_HOME = process.env.CODEX_HOME ?? '/var/lib/codex';
@@ -77,7 +78,10 @@ async function readJson(request) {
   }
 }
 
-export async function runCodexSummary(input, { canarySecret = process.env.SIDECAR_CANARY_SECRET ?? '' } = {}) {
+export async function runCodexSummary(input, {
+  canarySecret = process.env.SIDECAR_CANARY_SECRET ?? '',
+  materializeImages = materializePostImages,
+} = {}) {
   const { Codex } = await import('@openai/codex-sdk');
   const codex = new Codex({
     env: childEnvironment(),
@@ -86,36 +90,45 @@ export async function runCodexSummary(input, { canarySecret = process.env.SIDECA
       sandbox_workspace_write: { network_access: false },
     },
   });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const thread = codex.startThread({
-      model: MODEL,
-      sandboxMode: 'read-only',
-      workingDirectory: WORKING_DIRECTORY,
-      skipGitRepoCheck: true,
-      modelReasoningEffort: REASONING_EFFORT,
-      networkAccessEnabled: false,
-      webSearchMode: 'disabled',
-      approvalPolicy: 'never',
-      additionalDirectories: [],
-    });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TURN_TIMEOUT_MS);
-    try {
-      const result = await thread.run(buildPrompt(input), {
-        outputSchema: buildOutputSchema(input.posts.map((post) => post.id)),
-        signal: controller.signal,
+  const materialized = await materializeImages(input);
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const thread = codex.startThread({
+        model: MODEL,
+        sandboxMode: 'read-only',
+        workingDirectory: WORKING_DIRECTORY,
+        skipGitRepoCheck: true,
+        modelReasoningEffort: REASONING_EFFORT,
+        networkAccessEnabled: false,
+        webSearchMode: 'disabled',
+        approvalPolicy: 'never',
+        additionalDirectories: [],
       });
-      return validateModelResponse(result, input, canarySecret);
-    } catch (error) {
-      const retryableOutput = error instanceof PolicyError
-        && ['invalid_model_output', 'model_failure'].includes(error.code);
-      if (attempt === 0 && retryableOutput) continue;
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), TURN_TIMEOUT_MS);
+      try {
+        const modelInput = [
+          { type: 'text', text: buildPrompt(materialized.input) },
+          ...materialized.imagePaths.map((imagePath) => ({ type: 'local_image', path: imagePath })),
+        ];
+        const result = await thread.run(modelInput, {
+          outputSchema: buildOutputSchema(input.posts.map((post) => post.id)),
+          signal: controller.signal,
+        });
+        return validateModelResponse(result, input, canarySecret);
+      } catch (error) {
+        const retryableOutput = error instanceof PolicyError
+          && ['invalid_model_output', 'model_failure'].includes(error.code);
+        if (attempt === 0 && retryableOutput) continue;
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
     }
+    throw new PolicyError('model_failure', 'model returned no valid result', 502);
+  } finally {
+    await materialized.cleanup();
   }
-  throw new PolicyError('model_failure', 'model returned no valid result', 502);
 }
 
 export function createSidecarServer({

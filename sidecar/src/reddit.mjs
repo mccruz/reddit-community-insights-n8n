@@ -1,6 +1,20 @@
 import { PolicyError, normalizeSubreddit } from './policy.mjs';
 
 const MAX_FEED_BYTES = 2 * 1024 * 1024;
+const CACHE_TTL_MS = 15 * 60 * 1000;
+const UNAVAILABLE_CACHE_TTL_MS = 2 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 256;
+const commentCache = new Map();
+
+function pruneCommentCache() {
+  const now = Date.now();
+  for (const [key, entry] of commentCache) {
+    if (entry.expiresAt <= now) commentCache.delete(key);
+  }
+  while (commentCache.size > MAX_CACHE_ENTRIES) {
+    commentCache.delete(commentCache.keys().next().value);
+  }
+}
 
 function decodeEntities(value) {
   const named = {
@@ -81,13 +95,18 @@ function sleep(milliseconds) {
 async function fetchPostFeed(subreddit, postId, { fetchImpl, sleepImpl }) {
   const url = `https://www.reddit.com/comments/${postId}/.rss?sort=top&limit=10`;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetchImpl(url, {
-      headers: {
-        accept: 'application/atom+xml,text/xml;q=0.9,*/*;q=0.5',
-        'user-agent': 'linux:n8n-reddit-community-digest:v1.1 (portfolio automation)',
-      },
-      signal: AbortSignal.timeout(20_000),
-    });
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        headers: {
+          accept: 'application/atom+xml,text/xml;q=0.9,*/*;q=0.5',
+          'user-agent': 'linux:n8n-reddit-community-digest:v1.2 (portfolio automation)',
+        },
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch {
+      throw new PolicyError('reddit_unavailable', 'Reddit comment feed was unavailable', 503);
+    }
     if (response.ok) {
       const xml = await response.text();
       const expectedPath = new RegExp(`/r/${subreddit}/comments/${postId}/`, 'i');
@@ -106,15 +125,35 @@ async function fetchPostFeed(subreddit, postId, { fetchImpl, sleepImpl }) {
 }
 
 export async function fetchRedditComments(input, { fetchImpl = fetch, sleepImpl = sleep } = {}) {
-  const comments = [];
+  pruneCommentCache();
+  const posts = [];
   for (let index = 0; index < input.postIds.length; index += 1) {
-    const { response, comments: postComments } = await fetchPostFeed(
-      input.subreddit,
-      input.postIds[index],
-      { fetchImpl, sleepImpl },
-    );
-    comments.push(...postComments.filter((comment) => comment.postId === input.postIds[index]).slice(0, 10));
-    if (index < input.postIds.length - 1) await sleepImpl(resetDelayMs(response));
+    const postId = input.postIds[index];
+    const cacheKey = `${input.subreddit}:${postId}`;
+    const cached = commentCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      posts.push(cached.value);
+      continue;
+    }
+    let value;
+    let response;
+    try {
+      const fetched = await fetchPostFeed(input.subreddit, postId, { fetchImpl, sleepImpl });
+      response = fetched.response;
+      const comments = fetched.comments.filter((comment) => comment.postId === postId).slice(0, 10);
+      value = { postId, commentsStatus: comments.length ? 'available' : 'empty', comments };
+      commentCache.set(cacheKey, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+      pruneCommentCache();
+    } catch (error) {
+      if (!(error instanceof PolicyError) || error.code !== 'reddit_unavailable') throw error;
+      value = { postId, commentsStatus: 'unavailable', comments: [] };
+      commentCache.set(cacheKey, { value, expiresAt: Date.now() + UNAVAILABLE_CACHE_TTL_MS });
+      pruneCommentCache();
+    }
+    posts.push(value);
+    if (index < input.postIds.length - 1) {
+      await sleepImpl(response ? resetDelayMs(response) : 2_000);
+    }
   }
-  return { comments };
+  return { posts };
 }

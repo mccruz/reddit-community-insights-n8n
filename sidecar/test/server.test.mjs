@@ -12,6 +12,7 @@ const body = {
     url: 'https://www.reddit.com/r/AI_Agents/comments/post_1/example/',
     body: 'The author describes a reliability experiment.',
     comments: [],
+    commentsStatus: 'empty',
   }],
 };
 
@@ -68,14 +69,15 @@ test('does not expose internal exception text', async () => {
   });
 });
 
-test('exposes only bounded comment fields from the allowlisted Reddit fetcher', async () => {
+test('exposes per-post comment status from the allowlisted Reddit fetcher', async () => {
   const comments = [{ postId: 'post_1', author: 'reader', body: 'A response.', score: null }];
+  const posts = [{ postId: 'post_1', commentsStatus: 'available', comments }];
   const server = createSidecarServer({
     serviceToken: token,
     summarize: async () => ({ summaries: [] }),
     fetchComments: async (input) => {
       assert.deepEqual(input, { subreddit: 'codex', postIds: ['post_1'] });
-      return { comments };
+      return { posts };
     },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -87,7 +89,7 @@ test('exposes only bounded comment fields from the allowlisted Reddit fetcher', 
       body: JSON.stringify({ subreddit: 'codex', postIds: ['post_1'] }),
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { comments });
+    assert.deepEqual(await response.json(), { posts });
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

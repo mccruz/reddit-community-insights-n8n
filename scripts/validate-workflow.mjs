@@ -28,6 +28,38 @@ assert(
   'Slack nodes must use the public placeholder',
 );
 
+const commentNodes = nodes.filter((node) => node.name.startsWith('Fetch r-') && node.name.endsWith('Recent Comments'));
+assert(commentNodes.length === 2, 'expected two exact-thread comment nodes');
+assert(commentNodes.every((node) => !node.onError), 'comment collection must fail closed on sidecar transport errors');
+
+for (const lane of ['r-codex', 'r-AI_Agents']) {
+  const prepare = byName.get(`Prepare ${lane} Top Posts`);
+  const assemble = byName.get(`Assemble ${lane} Evidence`);
+  assert(prepare?.parameters?.jsCode.includes("['i.redd.it', 'preview.redd.it']"), `${lane} image host allowlist is missing`);
+  assert(prepare.parameters.jsCode.includes('media: mediaUrl'), `${lane} media evidence is missing`);
+  assert(assemble?.parameters?.jsCode.includes("['available', 'empty', 'unavailable']"), `${lane} comment status contract is missing`);
+  assert(assemble.parameters.jsCode.includes('media: post.media'), `${lane} media handoff is missing`);
+}
+
+const prepareFixture = byName.get('Prepare r-codex Top Posts');
+const preparedFixture = new Function('$input', prepareFixture.parameters.jsCode)({
+  all: () => [{ json: {
+    title: 'Image-only discussion',
+    link: 'https://www.reddit.com/r/codex/comments/image123/example/',
+    content: '<a href="https://i.redd.it/example.png">image</a><img src="https://preview.redd.it/example.png?width=640">',
+    contentSnippet: '[link] submitted by u/example',
+  } }],
+});
+assert(preparedFixture[0]?.json?.media?.url === 'https://i.redd.it/example.png', 'prepare fixture did not preserve the direct Reddit image URL');
+
+const assembleFixture = byName.get('Assemble r-codex Evidence');
+const assembledFixture = new Function('$input', '$', assembleFixture.parameters.jsCode)(
+  { first: () => ({ json: { posts: [{ postId: 'image123', commentsStatus: 'unavailable', comments: [] }] } }) },
+  () => ({ all: () => preparedFixture }),
+);
+assert(assembledFixture[0]?.json?.posts?.[0]?.commentsStatus === 'unavailable', 'assemble fixture lost comment availability state');
+assert(assembledFixture[0]?.json?.posts?.[0]?.media?.url === 'https://i.redd.it/example.png', 'assemble fixture lost image evidence');
+
 const expectedTriggers = [
   'Manual - r-codex',
   'Schedule - r-codex at 08:00 Manila',

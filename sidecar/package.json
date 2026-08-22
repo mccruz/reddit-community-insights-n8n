@@ -1,6 +1,6 @@
 {
   "name": "reddit-community-insights-sidecar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Fail-closed Codex summarization sidecar for the n8n Reddit community digest",

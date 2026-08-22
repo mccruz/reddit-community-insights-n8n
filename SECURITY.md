@@ -8,11 +8,12 @@ arbitrary URLs, shell commands, files, tools, thread continuation, or OAuth data
 
 ## Threat model
 
-The primary hostile input is text controlled by Reddit authors and commenters.
-That text may contain prompt-injection instructions, fake system messages,
-encoded data, malicious links, or requests to reveal secrets. A caller may also
-attempt oversized requests, unsupported subreddits, arbitrary post IDs,
-unauthorized access, output-shape manipulation, or denial of service.
+The primary hostile input is text and imagery controlled by Reddit authors and
+commenters. It may contain prompt-injection instructions, fake system messages,
+QR codes, encoded data, malicious links, malformed image payloads, or requests
+to reveal secrets. A caller may also attempt oversized requests, unsupported
+subreddits, arbitrary post IDs, unauthorized access, output-shape manipulation,
+server-side request forgery, decompression abuse, or denial of service.
 
 ## Controls
 
@@ -21,6 +22,11 @@ unauthorized access, output-shape manipulation, or denial of service.
 - Only `r/codex` and `r/AI_Agents` are accepted.
 - The Reddit fetcher constructs fixed HTTPS Reddit paths itself; callers cannot
   choose a host.
+- Image URLs must use HTTPS on exact `i.redd.it` or `preview.redd.it` hosts,
+  contain no credentials or custom port, and cannot redirect.
+- Image responses require an approved MIME type matching JPEG, PNG, or WebP
+  signature bytes and are bounded to 4 MiB, 12,000 pixels per dimension, and
+  40 million total pixels.
 - Post IDs, Reddit URLs, text lengths, post counts, comment counts, and total
   request bytes are validated and bounded.
 - The endpoint requires a bearer token stored as a Docker secret and compares it
@@ -34,7 +40,10 @@ unauthorized access, output-shape manipulation, or denial of service.
   use disabled.
 - The child receives a small environment allowlist rather than the sidecar or
   n8n environment.
-- Reddit text is delimited and explicitly labeled untrusted quoted evidence.
+- Reddit text and text visible inside images are explicitly labeled untrusted
+  quoted evidence.
+- Validated images exist only in the bounded temporary filesystem and are
+  removed after model execution.
 
 ### After model execution
 
@@ -44,6 +53,8 @@ unauthorized access, output-shape manipulation, or denial of service.
 - Secret-like values and a deployment-specific canary marker are rejected.
 - Internal exception text, model traces, thread IDs, and authentication material
   are never returned to n8n.
+- Comment results carry an explicit `available`, `empty`, or `unavailable`
+  status; retrieval errors cannot masquerade as threads with no comments.
 
 ### Container boundary
 

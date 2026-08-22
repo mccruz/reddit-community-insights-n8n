@@ -1,16 +1,17 @@
 # Reddit Community Insights with n8n
 
 An n8n workflow that reviews the daily top discussions in
-`r/codex` and `r/AI_Agents`, samples comments from the exact Reddit threads,
-creates evidence-grounded 3–4 sentence summaries, and sends one Slack digest
-per community.
+`r/codex` and `r/AI_Agents`, reviews allowlisted Reddit-hosted images, samples
+comments from the exact Reddit threads, creates evidence-grounded 3–4 sentence
+summaries, and sends one Slack digest per community.
 
 ![Workflow architecture](assets/architecture.svg)
 
 ## What this demonstrates
 
 - Self-hosted n8n orchestration with independent schedules and manual test paths.
-- Public RSS ingestion, bounded retries, and rate-limit-aware comment collection.
+- Public RSS ingestion, allowlisted image review, bounded retries, and
+  rate-limit-aware comment collection with explicit incomplete-evidence states.
 - Structured AI output instead of free-form text parsing.
 - A narrow, containerized summarization service with prompt-injection defenses.
 - Credential isolation: the importable workflow contains no tokens, credential
@@ -26,12 +27,17 @@ Each subreddit is an independent lane:
 2. n8n reads Reddit's public `Top/day` RSS feed and keeps the first three valid
    entries in the order Reddit returned them.
 3. A wait node respects the observed public Reddit rate window.
-4. The sidecar requests the exact thread comment feeds, sequentially, and keeps
-   at most ten public comments per displayed post.
-5. n8n assembles a bounded evidence object containing only the post, link, and
-   sampled comments.
-6. The isolated summarizer returns exactly one 3–4 sentence summary per post.
-7. n8n validates and formats the result, then posts a separate digest to Slack.
+4. The sidecar requests the exact thread comment feeds sequentially, keeps at
+   most ten public comments per displayed post, and labels each result
+   `available`, `empty`, or `unavailable`.
+5. For image submissions, the sidecar downloads only `i.redd.it` or
+   `preview.redd.it` content that passes redirect, MIME, signature, byte-size,
+   and pixel-dimension checks.
+6. n8n assembles a bounded evidence object containing the post, image status,
+   link, and sampled comments.
+7. The isolated summarizer receives temporary local images and returns exactly
+   one 3–4 sentence summary per post; temporary files are removed afterward.
+8. n8n validates and formats the result, then posts a separate digest to Slack.
 
 The two production schedules are intentionally staggered in the workflow:
 
@@ -107,12 +113,14 @@ intentionally paced.
 
 ## Security design
 
-Reddit posts and comments are untrusted input. The summarizer prompt labels them
-as quoted evidence, but the prompt is only one layer. The enforceable controls
-are described in [`SECURITY.md`](SECURITY.md) and include:
+Reddit posts, images, and comments are untrusted input. The summarizer prompt
+labels them as quoted evidence, but the prompt is only one layer. The
+enforceable controls are described in [`SECURITY.md`](SECURITY.md) and include:
 
 - fixed subreddit and URL allowlists;
 - bounded request and output sizes;
+- exact Reddit image-host allowlists, no redirects, content signature and MIME
+  agreement, a 4 MiB limit, and bounded dimensions;
 - a fresh model thread for every request;
 - read-only execution with network, web search, approvals, and tools disabled;
 - an explicit child-process environment allowlist;
@@ -151,8 +159,9 @@ prompt-injection payload without printing credentials.
 
 ## Honest limitations
 
-- Reddit RSS is a public, rate-limited interface and can be unavailable or omit
-  content visible in Reddit's web UI.
+- Reddit RSS and image delivery are public, rate-limited interfaces and can be
+  unavailable or omit content visible in Reddit's web UI. The digest labels
+  unavailable image or comment evidence instead of presenting it as absent.
 - The digest summarizes three posts and up to ten sampled comments per post; it
   does not claim statistical coverage or community consensus.
 - Comment scores are not available in the RSS evidence and are not invented.

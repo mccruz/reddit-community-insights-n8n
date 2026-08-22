@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: local/reddit-community-summary-sidecar:0.1.0
+    image: local/reddit-community-summary-sidecar:0.2.0
     restart: unless-stopped
     init: true
     user: "1000:1000"
