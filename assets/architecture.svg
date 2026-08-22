@@ -49,8 +49,8 @@
   </g>
 
   <g fill="none" stroke="#7dd3fc" stroke-width="4" marker-end="url(#arrow)">
-    <path d="M242 226 H288 Q300 226 300 238 V278"/>
-    <path d="M242 414 H288 Q300 414 300 402 V362"/>
+    <path d="M242 226 H270 Q286 226 286 242 V282 Q286 296 300 296 H312"/>
+    <path d="M242 414 H270 Q286 414 286 398 V358 Q286 344 300 344 H312"/>
     <path d="M524 320 H580"/>
     <path d="M856 320 H912"/>
   </g>
