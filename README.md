@@ -1,134 +1,115 @@
 # Reddit Community Insights with n8n
 
-An n8n workflow that reviews the daily top discussions in
-`r/codex` and `r/AI_Agents`, reviews allowlisted Reddit-hosted images, samples
-comments from the exact Reddit threads, creates evidence-grounded 3–4 sentence
-summaries, and sends one Slack digest per community.
+An n8n workflow that reviews daily discussions in `r/codex` and
+`r/AI_Agents`, summarizes each community separately, and sends two Slack
+digests with links to the original posts.
 
 ![Workflow architecture](assets/architecture.svg)
 
-## What this demonstrates
+## Review this project in 3 minutes
 
-- Self-hosted n8n orchestration with independent schedules and manual test paths.
-- Public RSS ingestion, allowlisted image review, bounded retries, and
-  rate-limit-aware comment collection with explicit incomplete-evidence states.
-- Structured AI output instead of free-form text parsing.
-- A narrow, containerized summarization service with prompt-injection defenses.
-- Credential isolation: the importable workflow contains no tokens, credential
-  references, private hostnames, or real Slack destination IDs.
-- Automated tests for workflow structure, request validation, authentication,
-  Reddit feed parsing, output policy, and error redaction.
+No setup is required to understand the project:
 
-## Runtime flow
+1. Follow the diagram from each subreddit to its Slack digest.
+2. Read [How it works](#how-it-works) and [Safety and limits](#safety-and-limits).
+3. Open the [architecture notes](docs/architecture.md) for the technical design
+   or the [workflow export](workflow/reddit-community-digest.json) to inspect
+   the n8n nodes.
 
-Each subreddit is an independent lane:
+## How it works
 
-1. A schedule or manual trigger starts the lane.
-2. n8n reads Reddit's public `Top/day` RSS feed and keeps the first three valid
-   entries in the order Reddit returned them.
-3. A wait node respects the observed public Reddit rate window.
-4. The sidecar requests the exact thread comment feeds sequentially, keeps at
-   most ten public comments per displayed post, and labels each result
-   `available`, `empty`, or `unavailable`.
-5. For image submissions, the sidecar downloads only `i.redd.it` or
-   `preview.redd.it` content that passes redirect, MIME, signature, byte-size,
-   and pixel-dimension checks.
-6. n8n assembles a bounded evidence object containing the post, image status,
-   link, and sampled comments.
-7. The isolated summarizer receives temporary local images and returns exactly
-   one 3–4 sentence summary per post; temporary files are removed afterward.
-8. n8n validates and formats the result, then posts a separate digest to Slack.
+Each subreddit runs separately:
 
-The two production schedules are intentionally staggered in the workflow:
+1. The workflow starts on schedule or manually for testing.
+2. It collects the top three daily Reddit posts.
+3. It gathers up to ten comments per post and reviews supported Reddit images.
+4. An isolated AI service summarizes each post, image, and sampled discussion
+   in 3–4 sentences.
+5. n8n checks and formats the summaries.
+6. Each subreddit receives a separate Slack digest with links to the original
+   posts.
 
-| Community | Schedule | Manual trigger |
+The schedules are staggered so the two communities do not request public Reddit
+feeds at the same time:
+
+| Community | Schedule | Manual test |
 | --- | --- | --- |
 | `r/codex` | Daily at 08:00 | `Manual - r-codex` |
 | `r/AI_Agents` | Daily at 08:20 | `Manual - r-AI_Agents` |
 
-The workflow timezone is `Asia/Manila`. n8n's canvas-level **Execute workflow**
-runs only the manual trigger selected beside the button; it does not start both
-independent lanes at once.
+The workflow uses the `Asia/Manila` timezone. Because the two manual triggers
+are independent, n8n's canvas-level **Execute workflow** button starts only the
+selected manual lane.
+
+## What this demonstrates
+
+- Independent n8n schedules and manual test paths.
+- Evidence-based summaries built from the exact post, supported image, and a
+  limited comment sample.
+- Explicit handling for unavailable images or comments instead of treating
+  missing evidence as an empty discussion.
+- Restricted AI summarization with no tools, web search, or general network
+  access.
+- Credential-free public workflow files, automated checks, and documented
+  operating limits.
 
 ## What “top” means
 
-“Top discussions” is not an AI-generated ranking. It means the first three
-valid posts returned by each subreddit's public Reddit `Top/day` RSS feed at
-execution time. Comment text is a bounded sample from each exact thread's RSS
-feed sorted by Reddit's `top` parameter; it is not a complete sentiment study.
+“Top discussions” is not an AI ranking. It means the first three valid posts
+returned by Reddit's public `Top/day` RSS feed when the workflow runs. Comments
+come from each post's exact RSS feed and are limited to ten entries, so the
+digest does not claim to represent the entire community.
 
-## Quick start
+## Optional setup
 
-### Prerequisites
+The repository contains a sanitized workflow and an isolated summarization
+service. A self-hosted deployment needs:
 
-- Self-hosted n8n 2.x on Docker.
-- Docker Compose and Node.js 22 for local verification.
-- A Slack credential that can post to the chosen channel or direct message.
-- Access to Codex CLI device authentication for the isolated sidecar. This
-  reference implementation does not require an OpenAI API key, but account and
-  plan availability can change; confirm the current Codex CLI terms before use.
+- n8n 2.x and Docker Compose;
+- a Slack credential for the chosen destination;
+- an authenticated Codex CLI volume for the summarization service; and
+- a private service token between n8n and the sidecar.
 
-### 1. Import the workflow
+The setup sequence is:
 
-Import [`workflow/reddit-community-digest.json`](workflow/reddit-community-digest.json)
-from n8n's workflow menu. The file is deliberately inactive and unbound.
+1. Import [`workflow/reddit-community-digest.json`](workflow/reddit-community-digest.json).
+2. Build and authenticate the service using the
+   [sidecar guide](sidecar/README.md).
+3. Bind the private service and Slack credentials inside n8n.
+4. Run each manual trigger, verify both Slack messages, and then activate the
+   schedules.
 
-### 2. Deploy the sidecar
+The public export is deliberately inactive and contains no credential values,
+private hostnames, or real Slack destination IDs. Do not commit an edited
+production export after credentials have been bound.
 
-```bash
-cd sidecar
-mkdir -p secrets
-openssl rand -hex 32 > secrets/service_token
-cp ../.env.example ../.env
-docker compose --env-file ../.env build
-```
+## Safety and limits
 
-Authenticate the isolated Codex volume without copying OAuth material into n8n:
+Reddit posts, images, and comments are untrusted input. The workflow therefore:
 
-```bash
-docker compose --env-file ../.env run --rm --entrypoint node summary-sidecar \
-  /app/node_modules/@openai/codex/bin/codex.js login --device-auth
-docker compose --env-file ../.env up -d
-```
+- accepts posts and comments only from the two configured communities;
+- accepts images only from approved Reddit image hosts and checks their type,
+  size, and dimensions;
+- limits the amount of text, comments, image data, and generated output;
+- runs each summary in a fresh, read-only process without tools or network
+  access;
+- validates the response structure and rejects tool activity or secret-like
+  output; and
+- removes temporary images after the request finishes.
 
-The Compose project expects the existing external Docker network `n8n_default`.
-Change that network name only if your n8n deployment uses a different one.
+Public Reddit feeds can be delayed, incomplete, or rate-limited. The digest
+labels unavailable evidence rather than inventing content. It does not include
+comment scores, measure sentiment, or claim community consensus. Delivery also
+depends on the operator's Slack permissions and self-hosted n8n reliability.
 
-### 3. Bind credentials in n8n
-
-Create and bind two credentials after import:
-
-- **HTTP Header Auth** for the four sidecar HTTP nodes. Header name:
-  `Authorization`; value: `Bearer <contents of sidecar/secrets/service_token>`.
-- **Slack API** for both Slack nodes.
-
-Replace `YOUR_SLACK_CHANNEL_ID` in both Slack nodes with the intended channel or
-direct-message ID. Never commit the edited, credential-bound production export.
-
-### 4. Test and activate
-
-Run each manual trigger separately, verify both Slack messages, then activate the
-workflow. A complete lane can take several minutes because Reddit requests are
-intentionally paced.
-
-## Security design
-
-Reddit posts, images, and comments are untrusted input. The summarizer prompt
-labels them as quoted evidence, but the prompt is only one layer. The
-enforceable controls are described in [`SECURITY.md`](SECURITY.md) and include:
-
-- fixed subreddit and URL allowlists;
-- bounded request and output sizes;
-- exact Reddit image-host allowlists, no redirects, content signature and MIME
-  agreement, a 4 MiB limit, and bounded dimensions;
-- a fresh model thread for every request;
-- read-only execution with network, web search, approvals, and tools disabled;
-- an explicit child-process environment allowlist;
-- schema validation plus rejection of tool activity and secret-like output;
-- bearer authentication, timing-safe token comparison, and generic errors;
-- a non-root, read-only, capability-free, resource-limited container.
+See the full [security model](SECURITY.md) and
+[architecture notes](docs/architecture.md) for implementation detail.
 
 ## Verification
+
+The repository includes checks for workflow structure, request validation,
+authentication, Reddit feed parsing, image handling, output policy, and error
+redaction. Run them with:
 
 ```bash
 node scripts/validate-workflow.mjs workflow/reddit-community-digest.json
@@ -136,39 +117,18 @@ cd sidecar
 npm ci --ignore-scripts
 npm test
 npm audit --omit=dev
-docker compose --env-file ../.env.example config --quiet
 ```
 
-The live canary in `sidecar/test/live-canary.mjs` is intentionally not part of
-CI because it requires a running authenticated sidecar. It verifies rejection of
-bad authorization, normal structured summarization, and safe handling of a
-prompt-injection payload without printing credentials.
+The live canary is kept outside CI because it requires a running authenticated
+service. CI and the importable workflow remain credential-free.
 
-## Repository map
+## Project guide
 
-```text
-.
-├── workflow/             Sanitized, importable n8n workflow
-├── sidecar/              Isolated Codex summarization service and tests
-├── scripts/              Workflow sanitization and validation tools
-├── docs/                 Architecture and public-reference review
-├── assets/               Recruiter-facing architecture visual
-├── SECURITY.md           Threat model and reporting guidance
-└── .github/workflows/    Credential-free CI checks
-```
-
-## Honest limitations
-
-- Reddit RSS and image delivery are public, rate-limited interfaces and can be
-  unavailable or omit content visible in Reddit's web UI. The digest labels
-  unavailable image or comment evidence instead of presenting it as absent.
-- The digest summarizes three posts and up to ten sampled comments per post; it
-  does not claim statistical coverage or community consensus.
-- Comment scores are not available in the RSS evidence and are not invented.
-- Delivery depends on the operator's Slack permissions and self-hosted n8n
-  reliability.
-- The sidecar is purpose-built for these two communities, not a general agent or
-  arbitrary URL-fetching service.
+- [Architecture](docs/architecture.md)
+- [Security model](SECURITY.md)
+- [Sidecar setup](sidecar/README.md)
+- [Importable workflow](workflow/reddit-community-digest.json)
+- [Public reference review](docs/public-reference-review.md)
 
 ## License
 
