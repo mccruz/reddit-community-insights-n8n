@@ -1,6 +1,6 @@
 # Reddit Community Insights with n8n
 
-A production-derived n8n workflow that reviews the daily top discussions in
+An n8n workflow that reviews the daily top discussions in
 `r/codex` and `r/AI_Agents`, samples comments from the exact Reddit threads,
 creates evidence-grounded 3–4 sentence summaries, and sends one Slack digest
 per community.
