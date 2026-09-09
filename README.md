@@ -1,20 +1,35 @@
 # Reddit Community Insights with n8n
 
-An n8n workflow that reviews daily discussions in `r/codex` and
-`r/AI_Agents`, summarizes each community separately, and sends two Slack
-digests with links to the original posts.
+An n8n workflow that turns daily discussions from two Reddit communities
+into separate Slack reading briefs. It helps a team choose which original
+threads deserve attention. A restricted LLM summarizes the supplied evidence.
+
+## Example result
+
+**Illustrative synthetic digest excerpt:** “A team describes adding approval
+checks to its agent workflow. The sampled discussion asks how failures are
+recorded. Comment coverage is limited, so follow the original thread before
+making a decision.”
+
+A digest also identifies its community, links the original posts, and labels
+unavailable image or comment evidence. See the
+[complete illustrative sample](examples/sample-digest.md). It is not a live
+Reddit extract or a measured model-quality result.
+
+## My contribution
+
+I built the independent n8n collection lanes, bounded Reddit evidence fetchers,
+restricted summarization service, output validation, and Slack formatting. The
+LLM writes summaries; fixed code controls sources, limits, and delivery format.
 
 ![Workflow architecture](assets/architecture.svg)
 
-## Review this project in 3 minutes
+<a id="review-this-project-in-3-minutes"></a>
 
-No setup is required to understand the project:
+## Explore the project
 
-1. Follow the diagram from each subreddit to its Slack digest.
-2. Read [How it works](#how-it-works) and [Safety and limits](#safety-and-limits).
-3. Open the [architecture notes](docs/architecture.md) for the technical design
-   or the [workflow export](workflow/reddit-community-digest.json) to inspect
-   the n8n nodes.
+Start with the example above, then follow the diagram and the
+[engineering evidence](#engineering-evidence). Setup is optional for review.
 
 ## How it works
 
@@ -41,17 +56,13 @@ The workflow uses the `Asia/Manila` timezone. Because the two manual triggers
 are independent, n8n's canvas-level **Execute workflow** button starts only the
 selected manual lane.
 
-## What this demonstrates
+## Engineering evidence
 
-- Independent n8n schedules and manual test paths.
-- Evidence-based summaries built from the exact post, supported image, and a
-  limited comment sample.
-- Explicit handling for unavailable images or comments instead of treating
-  missing evidence as an empty discussion.
-- Restricted AI summarization with no tools, web search, or general network
-  access.
-- Credential-free public workflow files, automated checks, and documented
-  operating limits.
+| Capability | Implementation | Check |
+| --- | --- | --- |
+| Restrict input and output | [Policy](sidecar/src/policy.mjs) | [Policy tests](sidecar/test/policy.test.mjs) |
+| Authenticate and isolate requests | [Server](sidecar/src/server.mjs) | [Server tests](sidecar/test/server.test.mjs) |
+| Bound comment and image evidence | [Comments](sidecar/src/reddit.mjs), [images](sidecar/src/media.mjs) | [Comment tests](sidecar/test/reddit.test.mjs), [image tests](sidecar/test/media.test.mjs) |
 
 ## What “top” means
 

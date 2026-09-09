@@ -54,4 +54,4 @@ volumes:
 networks:
   n8n:
     external: true
-    name: n8n_default
+    name: ${N8N_NETWORK:-n8n_default}
